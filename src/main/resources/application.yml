@@ -5,6 +5,10 @@ server:
 spring:
   application:
     name: seat-booking
+  config:
+    # Local runs read values from ./.env; real environment variables still take precedence.
+    # Optional, so Render and Docker (where .env is absent) start normally.
+    import: optional:file:.env[.properties]
   threads:
     virtual:
       enabled: true
@@ -12,7 +16,7 @@ spring:
     timeout-per-shutdown-phase: ${SHUTDOWN_TIMEOUT:20s}
 
   datasource:
-    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:seatbooking}
+    url: jdbc:postgresql://${DB_HOST:localhost}:${DB_PORT:5432}/${DB_NAME:seatbooking}?sslmode=${DB_SSL_MODE:prefer}
     username: ${DB_USER:seatbooking}
     password: ${DB_PASSWORD:}
     hikari:
@@ -25,3 +29,24 @@ spring:
   flyway:
     enabled: true
     locations: classpath:db/migration
+
+  jackson:
+    property-naming-strategy: SNAKE_CASE
+    default-property-inclusion: non_null
+    mapper:
+      accept-case-insensitive-enums: true
+
+logging:
+  level:
+    root: ${LOG_LEVEL_ROOT:INFO}
+    com.seatbooking: ${LOG_LEVEL:INFO}
+
+app:
+  auth:
+    jwt-secret: ${JWT_SECRET:}
+    token-ttl: ${JWT_TTL:1h}
+    issuer: ${JWT_ISSUER:seat-booking}
+    dev-token-enabled: ${AUTH_DEV_TOKEN_ENABLED:false}
+    admin-secret: ${ADMIN_SECRET:}
+  cors:
+    allowed-origins: ${CORS_ALLOWED_ORIGINS:*}

@@ -1,0 +1,7 @@
+app:
+  auth:
+    jwt-secret: test-only-jwt-secret-that-is-at-least-32-bytes-long
+    token-ttl: 1h
+    issuer: seat-booking-test
+    dev-token-enabled: true
+    admin-secret: test-admin-secret

@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<configuration>
+    <include resource="org/springframework/boot/logging/logback/defaults.xml"/>
+    <springProperty scope="context" name="SERVICE_NAME" source="spring.application.name" defaultValue="seat-booking"/>
+
+    <!-- Tests: human-readable console output. -->
+    <springProfile name="test">
+        <include resource="org/springframework/boot/logging/logback/console-appender.xml"/>
+        <root level="INFO">
+            <appender-ref ref="CONSOLE"/>
+        </root>
+    </springProfile>
+
+    <!-- Everywhere else: one JSON object per line. MDC keys (request_id, user_id) are included automatically. -->
+    <springProfile name="!test">
+        <appender name="JSON" class="ch.qos.logback.core.ConsoleAppender">
+            <encoder class="net.logstash.logback.encoder.LogstashEncoder">
+                <customFields>{"service":"${SERVICE_NAME}"}</customFields>
+                <fieldNames>
+                    <timestamp>timestamp</timestamp>
+                    <version>[ignore]</version>
+                    <levelValue>[ignore]</levelValue>
+                </fieldNames>
+                <throwableConverter class="net.logstash.logback.stacktrace.ShortenedThrowableConverter">
+                    <maxDepthPerThrowable>30</maxDepthPerThrowable>
+                    <rootCauseFirst>true</rootCauseFirst>
+                </throwableConverter>
+            </encoder>
+        </appender>
+
+        <!-- Request threads never block on stdout during a burst; if the queue fills, logs are dropped, not requests. -->
+        <appender name="ASYNC_JSON" class="ch.qos.logback.classic.AsyncAppender">
+            <appender-ref ref="JSON"/>
+            <queueSize>8192</queueSize>
+            <discardingThreshold>0</discardingThreshold>
+            <neverBlock>true</neverBlock>
+        </appender>
+
+        <root level="INFO">
+            <appender-ref ref="ASYNC_JSON"/>
+        </root>
+    </springProfile>
+</configuration>

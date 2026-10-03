@@ -29,6 +29,13 @@ services:
       DB_USER: ${DB_USER:-seatbooking}
       DB_PASSWORD: ${DB_PASSWORD:-localdev}
       DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+      DB_SSL_MODE: disable
+      # Local-development fallbacks only; set real values in .env.
+      JWT_SECRET: ${JWT_SECRET:-local-dev-only-jwt-secret-change-me-0123456789}
+      JWT_TTL: ${JWT_TTL:-1h}
+      AUTH_DEV_TOKEN_ENABLED: ${AUTH_DEV_TOKEN_ENABLED:-true}
+      ADMIN_SECRET: ${ADMIN_SECRET:-local-dev-admin-secret}
+      LOG_LEVEL: ${LOG_LEVEL:-INFO}
     ports:
       - "${APP_PORT:-8080}:8080"
     mem_limit: 512m
