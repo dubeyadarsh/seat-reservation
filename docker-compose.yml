@@ -16,5 +16,22 @@ services:
       timeout: 3s
       retries: 10
 
+  app:
+    build: .
+    depends_on:
+      postgres:
+        condition: service_healthy
+    environment:
+      PORT: 8080
+      DB_HOST: postgres
+      DB_PORT: 5432
+      DB_NAME: ${DB_NAME:-seatbooking}
+      DB_USER: ${DB_USER:-seatbooking}
+      DB_PASSWORD: ${DB_PASSWORD:-localdev}
+      DB_POOL_SIZE: ${DB_POOL_SIZE:-20}
+    ports:
+      - "${APP_PORT:-8080}:8080"
+    mem_limit: 512m
+
 volumes:
   pgdata:
