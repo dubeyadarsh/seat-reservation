@@ -36,6 +36,12 @@ spring:
     mapper:
       accept-case-insensitive-enums: true
 
+springdoc:
+  api-docs:
+    enabled: ${SWAGGER_ENABLED:true}
+  swagger-ui:
+    enabled: ${SWAGGER_ENABLED:true}
+
 logging:
   level:
     root: ${LOG_LEVEL_ROOT:INFO}
