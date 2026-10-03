@@ -40,15 +40,6 @@ class AuthControllerIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
-    void versionedPathWorksToo() throws Exception {
-        mockMvc.perform(post("/api/v1/auth/token")
-                        .contentType(MediaType.APPLICATION_JSON)
-                        .content("{\"user_id\":\"alice\"}"))
-                .andExpect(status().isOk())
-                .andExpect(jsonPath("$.access_token", notNullValue()));
-    }
-
-    @Test
     void issuesAdminTokenOnlyWithSecret() throws Exception {
         mockMvc.perform(post("/auth/token")
                         .contentType(MediaType.APPLICATION_JSON)

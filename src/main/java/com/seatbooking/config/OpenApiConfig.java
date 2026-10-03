@@ -1,5 +1,7 @@
 package com.seatbooking.config;
 
+import com.fasterxml.jackson.databind.ObjectMapper;
+import io.swagger.v3.core.jackson.ModelResolver;
 import io.swagger.v3.oas.models.Components;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.info.Info;
@@ -27,5 +29,11 @@ public class OpenApiConfig {
                         .scheme("bearer")
                         .bearerFormat("JWT")))
                 .addSecurityItem(new SecurityRequirement().addList(BEARER_SCHEME));
+    }
+
+    /** Without this, springdoc uses its own ObjectMapper and documents camelCase instead of the real snake_case. */
+    @Bean
+    public ModelResolver modelResolver(ObjectMapper objectMapper) {
+        return new ModelResolver(objectMapper);
     }
 }

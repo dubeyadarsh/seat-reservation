@@ -6,6 +6,7 @@ import com.seatbooking.dto.auth.TokenRequest;
 import com.seatbooking.dto.auth.TokenResponse;
 import com.seatbooking.security.AuthenticatedUser;
 import com.seatbooking.service.AuthService;
+import io.swagger.v3.oas.annotations.Parameter;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -17,7 +18,7 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 @RestController
-@RequestMapping({"/auth", "/api/v1/auth"})
+@RequestMapping("/auth")
 @RequiredArgsConstructor
 public class AuthController {
 
@@ -26,6 +27,7 @@ public class AuthController {
     @PostMapping("/token")
     public TokenResponse issueToken(
             @Valid @RequestBody TokenRequest request,
+            @Parameter(description = "Required only when role is ADMIN")
             @RequestHeader(name = SecurityConfig.ADMIN_SECRET_HEADER, required = false) String adminSecret) {
         return authService.issueToken(request, adminSecret);
     }

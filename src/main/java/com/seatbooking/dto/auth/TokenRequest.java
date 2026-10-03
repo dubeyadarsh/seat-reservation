@@ -1,6 +1,7 @@
 package com.seatbooking.dto.auth;
 
 import com.seatbooking.security.Role;
+import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.Pattern;
 
@@ -12,7 +13,9 @@ public record TokenRequest(
         @NotBlank(message = "user_id is required")
         @Pattern(regexp = "^[A-Za-z0-9_.@-]{1,64}$",
                 message = "user_id must be 1-64 characters: letters, digits, _ . @ -")
+        @Schema(example = "alice")
         String userId,
+        @Schema(description = "USER (default) or ADMIN. ADMIN also requires the X-Admin-Secret header.")
         Role role) {
 
     public Role roleOrDefault() {

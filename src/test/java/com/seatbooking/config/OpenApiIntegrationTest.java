@@ -26,6 +26,14 @@ class OpenApiIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void schemasUseSameSnakeCaseNamesAsRealPayloads() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.components.schemas.TokenRequest.properties.user_id", notNullValue()))
+                .andExpect(jsonPath("$.components.schemas.TokenResponse.properties.access_token", notNullValue()));
+    }
+
+    @Test
     void swaggerUiIsPublic() throws Exception {
         mockMvc.perform(get("/swagger-ui/index.html"))
                 .andExpect(status().isOk());
