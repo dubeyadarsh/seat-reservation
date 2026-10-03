@@ -35,6 +35,31 @@ spring:
     default-property-inclusion: non_null
     mapper:
       accept-case-insensitive-enums: true
+    deserialization:
+      # Money is integer paise: reject 250.5 instead of silently truncating it to 250.
+      accept-float-as-int: false
+
+management:
+  endpoints:
+    web:
+      # Serves /health/liveness, /health/readiness and /metrics at the root instead of under /actuator.
+      base-path: /
+      exposure:
+        include: health, prometheus
+      path-mapping:
+        prometheus: metrics
+  endpoint:
+    health:
+      probes:
+        enabled: true
+      group:
+        # Liveness stays independent of the DB so a DB outage never triggers a restart loop.
+        readiness:
+          include: readinessState, db
+  metrics:
+    distribution:
+      percentiles-histogram:
+        http.server.requests: true
 
 springdoc:
   api-docs:

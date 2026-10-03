@@ -3,6 +3,7 @@ package com.seatbooking.config;
 import com.seatbooking.observability.CorrelationIdFilter;
 import com.seatbooking.security.JwtAuthenticationFilter;
 import com.seatbooking.security.JwtService;
+import com.seatbooking.security.Role;
 import java.util.List;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.boot.context.properties.EnableConfigurationProperties;
@@ -69,6 +70,8 @@ public class SecurityConfig {
                         .accessDeniedHandler(accessDeniedHandler))
                 .authorizeHttpRequests(auth -> auth
                         .requestMatchers(HttpMethod.POST, "/auth/token").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/health/**", "/metrics").permitAll()
+                        .requestMatchers(HttpMethod.POST, "/shows").hasRole(Role.ADMIN.name())
                         .requestMatchers("/swagger-ui.html", "/swagger-ui/**", "/v3/api-docs/**").permitAll()
                         .requestMatchers("/error").permitAll()
                         .anyRequest().authenticated())
