@@ -43,4 +43,17 @@ class HealthAndMetricsIntegrationTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(content().string(containsString("http_server_requests_seconds_count")));
     }
+
+    /** Registered at startup so the burst dashboard shows 0 rather than a missing series. */
+    @Test
+    void reservationMetricsArePresentBeforeAnyTraffic() throws Exception {
+        mockMvc.perform(get("/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("reservations_confirmed_total")))
+                .andExpect(content().string(containsString("reservations_declined_total{reason=\"seat_taken\"}")))
+                .andExpect(content().string(containsString("reservations_declined_total{reason=\"per_user_limit\"}")))
+                .andExpect(content().string(
+                        containsString("reservations_declined_total{reason=\"idempotent_replay\"}")))
+                .andExpect(content().string(containsString("seats_available")));
+    }
 }
