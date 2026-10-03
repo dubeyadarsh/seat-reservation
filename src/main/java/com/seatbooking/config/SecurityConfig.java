@@ -1,5 +1,6 @@
 package com.seatbooking.config;
 
+import com.seatbooking.controller.ReservationController;
 import com.seatbooking.observability.CorrelationIdFilter;
 import com.seatbooking.security.JwtAuthenticationFilter;
 import com.seatbooking.security.JwtService;
@@ -90,6 +91,7 @@ public class SecurityConfig {
                 HttpHeaders.AUTHORIZATION,
                 HttpHeaders.CONTENT_TYPE,
                 CorrelationIdFilter.REQUEST_ID_HEADER,
+                ReservationController.IDEMPOTENCY_KEY_HEADER,
                 ADMIN_SECRET_HEADER));
         config.setExposedHeaders(List.of(CorrelationIdFilter.REQUEST_ID_HEADER));
         config.setAllowCredentials(false);

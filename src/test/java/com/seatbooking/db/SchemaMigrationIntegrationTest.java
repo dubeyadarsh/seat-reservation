@@ -1,6 +1,7 @@
 package com.seatbooking.db;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.assertj.core.api.Assertions.assertThatCode;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.seatbooking.support.AbstractPostgresIntegrationTest;
@@ -25,7 +26,24 @@ class SchemaMigrationIntegrationTest extends AbstractPostgresIntegrationTest {
                 .query(String.class)
                 .list();
 
-        assertThat(versions).containsExactly("1");
+        assertThat(versions).containsExactly("1", "2");
+    }
+
+    @Test
+    void rejectsReusedIdempotencyKeyForSameUser() {
+        UUID showId = insertShow(VALID_PRICE_PAISE, 1);
+        insertReservation(showId, "alice", "key-1");
+
+        assertThatThrownBy(() -> insertReservation(showId, "alice", "key-1"))
+                .isInstanceOf(DataIntegrityViolationException.class);
+    }
+
+    @Test
+    void allowsSameIdempotencyKeyForDifferentUsers() {
+        UUID showId = insertShow(VALID_PRICE_PAISE, 1);
+        insertReservation(showId, "alice", "shared-key");
+
+        assertThatCode(() -> insertReservation(showId, "bob", "shared-key")).doesNotThrowAnyException();
     }
 
     @Test
@@ -84,6 +102,16 @@ class SchemaMigrationIntegrationTest extends AbstractPostgresIntegrationTest {
                 .params("test-show", pricePaise, totalSeats)
                 .query(UUID.class)
                 .single();
+    }
+
+    private void insertReservation(UUID showId, String userId, String idempotencyKey) {
+        jdbc.sql("""
+                        INSERT INTO reservations
+                            (show_id, user_id, idempotency_key, request_hash, seat_labels, amount_paise, status)
+                        VALUES (?, ?, ?, repeat('a', 64), ?::text[], ?, 'CONFIRMED')
+                        """)
+                .params(showId, userId, idempotencyKey, new String[] {"A1"}, VALID_PRICE_PAISE)
+                .update();
     }
 
     private void insertSeat(UUID showId, String label, int position) {

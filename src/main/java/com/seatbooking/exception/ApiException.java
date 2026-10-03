@@ -23,6 +23,11 @@ public class ApiException extends RuntimeException {
         return new ApiException(HttpStatus.BAD_REQUEST, code, message);
     }
 
+    /** Domain declines (seat taken, over the per-user limit, reused key) are 409, never 5xx. */
+    public static ApiException conflict(String code, String message) {
+        return new ApiException(HttpStatus.CONFLICT, code, message);
+    }
+
     public static ApiException notFound(String message) {
         return new ApiException(HttpStatus.NOT_FOUND, "not_found", message);
     }
