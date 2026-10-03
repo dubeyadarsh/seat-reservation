@@ -8,6 +8,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
+import org.springframework.dao.ConcurrencyFailureException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
@@ -15,6 +16,7 @@ import org.springframework.validation.FieldError;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.method.annotation.MethodArgumentTypeMismatchException;
 
 /** Turns every exception into an {@link ErrorResponse}. */
 @Slf4j
@@ -54,6 +56,24 @@ public class GlobalExceptionHandler {
             fieldErrors.putIfAbsent(SNAKE_CASE.translate(error.getField()), error.getDefaultMessage());
         }
         return ResponseEntity.badRequest().body(ErrorResponse.withFieldErrors("Request validation failed", fieldErrors));
+    }
+
+    /**
+     * Lock timeout or deadlock loser. Ordered seat locking should prevent these, but a burst must
+     * never answer 5xx, so a transient conflict is reported as the domain decline it really is.
+     */
+    @ExceptionHandler(ConcurrencyFailureException.class)
+    public ResponseEntity<ErrorResponse> handleConcurrencyFailure(ConcurrencyFailureException ex) {
+        log.warn("Concurrency failure while reserving", ex);
+        return ResponseEntity.status(HttpStatus.CONFLICT)
+                .body(ErrorResponse.of("seat_taken", "Seat selection conflicted; please retry"));
+    }
+
+    /** A path or query value that cannot be converted, such as a show id that is not a UUID. */
+    @ExceptionHandler(MethodArgumentTypeMismatchException.class)
+    public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
+        return ResponseEntity.badRequest()
+                .body(ErrorResponse.of("invalid_parameter", SNAKE_CASE.translate(ex.getName()) + " is not valid"));
     }
 
     /** Body is missing or not valid JSON. */

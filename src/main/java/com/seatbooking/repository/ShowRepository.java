@@ -1,13 +1,13 @@
 package com.seatbooking.repository;
 
 import com.seatbooking.model.Show;
-import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import lombok.RequiredArgsConstructor;
 import org.springframework.jdbc.core.simple.JdbcClient;
 import org.springframework.stereotype.Repository;
 
-/** Repository pattern: all SQL for shows and their seats lives here. */
+/** Repository pattern: all SQL against the shows table lives here. */
 @Repository
 @RequiredArgsConstructor
 public class ShowRepository {
@@ -18,11 +18,10 @@ public class ShowRepository {
             RETURNING id
             """;
 
-    /** One statement for all seats; position is the label's index in the request (0-based). */
-    private static final String INSERT_SEATS = """
-            INSERT INTO seats (show_id, seat_label, position)
-            SELECT ?, label, ordinality - 1
-            FROM unnest(?::text[]) WITH ORDINALITY AS t(label, ordinality)
+    private static final String SELECT_SHOW = """
+            SELECT id, name, price_paise, per_user_limit, total_seats
+            FROM shows
+            WHERE id = ?
             """;
 
     private final JdbcClient jdbc;
@@ -35,9 +34,15 @@ public class ShowRepository {
         return new Show(id, name, pricePaise, perUserLimit, totalSeats);
     }
 
-    public void insertSeats(UUID showId, List<String> labels) {
-        jdbc.sql(INSERT_SEATS)
-                .params(showId, labels.toArray(String[]::new))
-                .update();
+    public Optional<Show> findShow(UUID showId) {
+        return jdbc.sql(SELECT_SHOW)
+                .param(showId)
+                .query((rs, rowNum) -> new Show(
+                        rs.getObject("id", UUID.class),
+                        rs.getString("name"),
+                        rs.getLong("price_paise"),
+                        rs.getInt("per_user_limit"),
+                        rs.getInt("total_seats")))
+                .optional();
     }
 }

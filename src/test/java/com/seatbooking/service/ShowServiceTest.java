@@ -17,6 +17,7 @@ import com.seatbooking.exception.ApiException;
 import com.seatbooking.model.Seat;
 import com.seatbooking.model.SeatStatus;
 import com.seatbooking.model.Show;
+import com.seatbooking.repository.SeatRepository;
 import com.seatbooking.repository.ShowRepository;
 import java.util.List;
 import java.util.UUID;
@@ -29,7 +30,8 @@ class ShowServiceTest {
     private static final UUID SHOW_ID = UUID.randomUUID();
 
     private final ShowRepository repository = mock(ShowRepository.class);
-    private final ShowService service = new ShowService(repository);
+    private final SeatRepository seatRepository = mock(SeatRepository.class);
+    private final ShowService service = new ShowService(repository, seatRepository);
 
     @Test
     void createsShowWithEverySeatAvailableInRequestOrder() {
@@ -45,7 +47,7 @@ class ShowServiceTest {
         assertThat(response.seats()).extracting(Seat::label).containsExactly("B2", "A1", "C3");
         assertThat(response.seats()).extracting(Seat::status).containsOnly(SeatStatus.AVAILABLE);
         assertThat(response.counts()).isEqualTo(new SeatCounts(3, 0, 0));
-        verify(repository).insertSeats(SHOW_ID, labels);
+        verify(seatRepository).insertSeats(SHOW_ID, labels);
     }
 
     @Test

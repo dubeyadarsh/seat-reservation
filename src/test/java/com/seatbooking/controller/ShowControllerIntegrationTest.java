@@ -6,6 +6,7 @@ import static org.hamcrest.Matchers.everyItem;
 import static org.hamcrest.Matchers.is;
 import static org.hamcrest.Matchers.notNullValue;
 import static org.hamcrest.Matchers.startsWith;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.header;
 import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.jsonPath;
@@ -106,6 +107,42 @@ class ShowControllerIntegrationTest extends AbstractPostgresIntegrationTest {
         createShow("{\"name\":\"float\",\"seats\":[\"A1\"],\"price_paise\":250.5}", adminToken())
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.error").value("malformed_request"));
+    }
+
+    @Test
+    void anyoneCanReadShowStateAndCountsReconcile() throws Exception {
+        UUID showId = createdShowId();
+
+        mockMvc.perform(get("/shows/{id}", showId))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.id").value(showId.toString()))
+                .andExpect(jsonPath("$.total_seats").value(3))
+                .andExpect(jsonPath("$.counts.available").value(3))
+                .andExpect(jsonPath("$.counts.held").value(0))
+                .andExpect(jsonPath("$.counts.confirmed").value(0))
+                .andExpect(jsonPath("$.seats[*].label").value(contains("A1", "A2", "A3")))
+                .andExpect(jsonPath("$.seats[*].status", everyItem(is("available"))));
+    }
+
+    @Test
+    void unknownShowReturnsNotFound() throws Exception {
+        mockMvc.perform(get("/shows/{id}", UUID.randomUUID()))
+                .andExpect(status().isNotFound())
+                .andExpect(jsonPath("$.error").value("not_found"));
+    }
+
+    @Test
+    void malformedShowIdIsClientErrorNotServerError() throws Exception {
+        mockMvc.perform(get("/shows/{id}", "not-a-uuid"))
+                .andExpect(status().isBadRequest())
+                .andExpect(jsonPath("$.error").value("invalid_parameter"));
+    }
+
+    private UUID createdShowId() throws Exception {
+        String json = createShow(VALID_BODY, adminToken())
+                .andExpect(status().isCreated())
+                .andReturn().getResponse().getContentAsString();
+        return UUID.fromString(objectMapper.readTree(json).get("id").asText());
     }
 
     private ResultActions createShow(String body, String token) throws Exception {
