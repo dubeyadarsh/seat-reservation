@@ -8,10 +8,12 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 import com.seatbooking.support.AbstractPostgresIntegrationTest;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
+import org.springframework.boot.test.autoconfigure.actuate.observability.AutoConfigureObservability;
 import org.springframework.boot.test.autoconfigure.web.servlet.AutoConfigureMockMvc;
 import org.springframework.test.web.servlet.MockMvc;
 
 @AutoConfigureMockMvc
+@AutoConfigureObservability
 class OpenApiIntegrationTest extends AbstractPostgresIntegrationTest {
 
     @Autowired
@@ -31,6 +33,16 @@ class OpenApiIntegrationTest extends AbstractPostgresIntegrationTest {
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.components.schemas.TokenRequest.properties.user_id", notNullValue()))
                 .andExpect(jsonPath("$.components.schemas.TokenResponse.properties.access_token", notNullValue()));
+    }
+
+    @Test
+    void healthAndMetricsEndpointsAreListed() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.paths['/health/liveness'].get", notNullValue()))
+                .andExpect(jsonPath("$.paths['/health/readiness'].get", notNullValue()))
+                .andExpect(jsonPath("$.paths['/health/**']").doesNotExist())
+                .andExpect(jsonPath("$.paths['/metrics']", notNullValue()));
     }
 
     @Test

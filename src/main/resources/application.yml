@@ -62,6 +62,7 @@ management:
         http.server.requests: true
 
 springdoc:
+  show-actuator: true
   api-docs:
     enabled: ${SWAGGER_ENABLED:true}
   swagger-ui:
