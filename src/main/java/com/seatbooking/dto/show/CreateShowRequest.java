@@ -1,5 +1,6 @@
 package com.seatbooking.dto.show;
 
+import io.swagger.v3.oas.annotations.media.ArraySchema;
 import io.swagger.v3.oas.annotations.media.Schema;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.NotEmpty;
@@ -19,6 +20,9 @@ public record CreateShowRequest(
         @Size(max = 200, message = "name must be at most 200 characters")
         String name,
 
+        @ArraySchema(arraySchema = @Schema(
+                description = "Seat labels in display order; total_seats is the number of labels.",
+                example = "[\"A1\", \"A2\", \"A3\", \"B1\", \"B2\", \"B3\"]"))
         @NotEmpty(message = "seats must not be empty")
         @Size(max = CreateShowRequest.MAX_SEATS, message = "seats must have at most " + CreateShowRequest.MAX_SEATS + " entries")
         List<@NotNull(message = "seat label is required")

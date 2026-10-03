@@ -34,6 +34,13 @@ class OpenApiIntegrationTest extends AbstractPostgresIntegrationTest {
     }
 
     @Test
+    void createShowExampleListsSeatLabels() throws Exception {
+        mockMvc.perform(get("/v3/api-docs"))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.components.schemas.CreateShowRequest.properties.seats.example[0]").value("A1"));
+    }
+
+    @Test
     void swaggerUiIsPublic() throws Exception {
         mockMvc.perform(get("/swagger-ui/index.html"))
                 .andExpect(status().isOk());
