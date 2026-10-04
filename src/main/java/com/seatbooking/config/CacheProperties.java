@@ -12,11 +12,13 @@ import org.springframework.validation.annotation.Validated;
  * @param soldSeatTtl        upper bound on how long another instance may keep declining a seat after a cancel
  * @param soldSeatMaxEntries confirmed seats remembered for the in-memory decline fast path
  * @param showMaxEntries     shows kept in memory; shows are immutable, so entries never go stale
+ * @param verifiedTokenMaxEntries tokens whose signature was already checked; each is still re-checked for expiry
  */
 @Validated
 @ConfigurationProperties(prefix = "app.cache")
 public record CacheProperties(
         @NotNull Duration soldSeatTtl,
         @Min(1) long soldSeatMaxEntries,
-        @Min(1) long showMaxEntries) {
+        @Min(1) long showMaxEntries,
+        @Min(1) long verifiedTokenMaxEntries) {
 }

@@ -41,7 +41,9 @@ class HealthAndMetricsIntegrationTest extends AbstractPostgresIntegrationTest {
 
         mockMvc.perform(get("/metrics"))
                 .andExpect(status().isOk())
-                .andExpect(content().string(containsString("http_server_requests_seconds_count")));
+                .andExpect(content().string(containsString("http_server_requests_seconds_count")))
+                .andExpect(content().string(containsString("http_server_requests_seconds_bucket")))
+                .andExpect(content().string(containsString("le=\"0.25\"")));
     }
 
     /** Registered at startup so the burst dashboard shows 0 rather than a missing series. */

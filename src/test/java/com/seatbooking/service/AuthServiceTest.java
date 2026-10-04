@@ -4,6 +4,7 @@ import static org.assertj.core.api.Assertions.assertThat;
 import static org.assertj.core.api.Assertions.assertThatThrownBy;
 
 import com.seatbooking.config.AuthProperties;
+import com.seatbooking.config.CacheProperties;
 import com.seatbooking.dto.auth.TokenRequest;
 import com.seatbooking.dto.auth.TokenResponse;
 import com.seatbooking.exception.ApiException;
@@ -68,6 +69,7 @@ class AuthServiceTest {
     private static AuthService service(boolean devTokenEnabled, String adminSecret) {
         AuthProperties properties = new AuthProperties(
                 "unit-test-jwt-secret-of-at-least-32-bytes", TTL, "seat-booking", devTokenEnabled, adminSecret);
-        return new AuthService(properties, new JwtService(properties, Clock.systemUTC()));
+        return new AuthService(properties, new JwtService(properties, Clock.systemUTC(),
+                new CacheProperties(Duration.ofSeconds(10), 100, 100, 100)));
     }
 }

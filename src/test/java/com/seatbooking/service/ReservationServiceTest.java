@@ -56,7 +56,7 @@ class ReservationServiceTest {
     private final SeatRepository seatRepository = mock(SeatRepository.class);
     private final ReservationRepository reservationRepository = mock(ReservationRepository.class);
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final CacheProperties cacheProperties = new CacheProperties(Duration.ofMinutes(1), 1_000, 100);
+    private final CacheProperties cacheProperties = new CacheProperties(Duration.ofMinutes(1), 1_000, 100, 100);
     private final SoldSeatCache soldSeats = new SoldSeatCache(cacheProperties);
     private final ReservationService service = new ReservationService(
             new ShowCache(showRepository, cacheProperties), soldSeats, seatRepository, reservationRepository,

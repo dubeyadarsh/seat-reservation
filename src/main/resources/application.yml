@@ -67,8 +67,10 @@ management:
           include: readinessState, db
   metrics:
     distribution:
-      percentiles-histogram:
-        http.server.requests: true
+      # A handful of fixed buckets still gives p95/p99 via histogram_quantile, at a fraction of the
+      # per-request cost and scrape size of the ~70-bucket default histogram.
+      slo:
+        http.server.requests: 10ms, 50ms, 100ms, 250ms, 500ms, 1s, 2500ms, 5s, 10s, 30s
 
 springdoc:
   show-actuator: true
@@ -99,3 +101,4 @@ app:
     sold-seat-ttl: ${SOLD_SEAT_CACHE_TTL:10s}
     sold-seat-max-entries: ${SOLD_SEAT_CACHE_MAX_ENTRIES:100000}
     show-max-entries: ${SHOW_CACHE_MAX_ENTRIES:10000}
+    verified-token-max-entries: ${TOKEN_CACHE_MAX_ENTRIES:10000}

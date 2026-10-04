@@ -1,6 +1,9 @@
 package com.seatbooking.security;
 
+import com.github.benmanes.caffeine.cache.Cache;
+import com.github.benmanes.caffeine.cache.Caffeine;
 import com.seatbooking.config.AuthProperties;
+import com.seatbooking.config.CacheProperties;
 import io.jsonwebtoken.Claims;
 import io.jsonwebtoken.JwtException;
 import io.jsonwebtoken.JwtParser;
@@ -16,7 +19,14 @@ import java.util.Set;
 import javax.crypto.SecretKey;
 import org.springframework.stereotype.Service;
 
-/** Issues and verifies HS256-signed JWTs. Stateless: any instance can verify any token. */
+/**
+ * Issues and verifies HS256-signed JWTs. Stateless: any instance can verify any token.
+ *
+ * <p>A burst sends the same token many times, so a successfully verified token is remembered and its
+ * signature and JSON are not re-parsed. Only tokens that passed full verification are cached, keyed by
+ * the exact token string, and a cached token is still rejected the moment it expires. Tokens cannot be
+ * revoked before expiry, so caching changes no security outcome.
+ */
 @Service
 public class JwtService {
 
@@ -26,8 +36,9 @@ public class JwtService {
     private final Clock clock;
     private final SecretKey signingKey;
     private final JwtParser parser;
+    private final Cache<String, VerifiedToken> verified;
 
-    public JwtService(AuthProperties properties, Clock clock) {
+    public JwtService(AuthProperties properties, Clock clock, CacheProperties cacheProperties) {
         this.properties = properties;
         this.clock = clock;
         this.signingKey = Keys.hmacShaKeyFor(properties.jwtSecret().getBytes(StandardCharsets.UTF_8));
@@ -35,6 +46,10 @@ public class JwtService {
                 .verifyWith(signingKey)
                 .requireIssuer(properties.issuer())
                 .clock(() -> Date.from(clock.instant()))
+                .build();
+        this.verified = Caffeine.newBuilder()
+                .maximumSize(cacheProperties.verifiedTokenMaxEntries())
+                .expireAfterWrite(properties.tokenTtl())
                 .build();
     }
 
@@ -54,6 +69,16 @@ public class JwtService {
 
     /** @throws InvalidTokenException if the signature, issuer, expiry or claims are invalid */
     public AuthenticatedUser verify(String token) {
+        VerifiedToken cached = verified.getIfPresent(token);
+        if (cached != null && clock.instant().isBefore(cached.expiresAt())) {
+            return cached.user();
+        }
+        VerifiedToken fresh = parse(token);
+        verified.put(token, fresh);
+        return fresh.user();
+    }
+
+    private VerifiedToken parse(String token) {
         Claims claims;
         try {
             claims = parser.parseSignedClaims(token).getPayload();
@@ -64,7 +89,12 @@ public class JwtService {
         if (userId == null || userId.isBlank()) {
             throw new InvalidTokenException("Token has no subject");
         }
-        return new AuthenticatedUser(userId, parseRoles(claims.get(ROLES_CLAIM)));
+        if (claims.getExpiration() == null) {
+            throw new InvalidTokenException("Token has no expiry");
+        }
+        return new VerifiedToken(
+                new AuthenticatedUser(userId, parseRoles(claims.get(ROLES_CLAIM))),
+                claims.getExpiration().toInstant());
     }
 
     private static Set<Role> parseRoles(Object claim) {
@@ -80,5 +110,8 @@ public class JwtService {
             }
         }
         return roles;
+    }
+
+    private record VerifiedToken(AuthenticatedUser user, Instant expiresAt) {
     }
 }

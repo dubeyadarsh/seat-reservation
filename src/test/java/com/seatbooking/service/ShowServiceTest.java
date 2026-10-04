@@ -37,7 +37,7 @@ class ShowServiceTest {
     private final ShowRepository repository = mock(ShowRepository.class);
     private final SeatRepository seatRepository = mock(SeatRepository.class);
     private final ShowService service = new ShowService(repository, seatRepository,
-            new ShowCache(repository, new CacheProperties(Duration.ofSeconds(10), 100, 100)));
+            new ShowCache(repository, new CacheProperties(Duration.ofSeconds(10), 100, 100, 100)));
 
     @Test
     void createsShowWithEverySeatAvailableInRequestOrder() {
