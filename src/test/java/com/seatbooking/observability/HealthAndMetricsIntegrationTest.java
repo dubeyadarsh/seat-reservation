@@ -56,4 +56,12 @@ class HealthAndMetricsIntegrationTest extends AbstractPostgresIntegrationTest {
                         containsString("reservations_declined_total{reason=\"idempotent_replay\"}")))
                 .andExpect(content().string(containsString("seats_available")));
     }
+
+    @Test
+    void loadSheddingMetricsArePresentBeforeAnyOverload() throws Exception {
+        mockMvc.perform(get("/metrics"))
+                .andExpect(status().isOk())
+                .andExpect(content().string(containsString("http_requests_shed_total")))
+                .andExpect(content().string(containsString("http_requests_queued")));
+    }
 }

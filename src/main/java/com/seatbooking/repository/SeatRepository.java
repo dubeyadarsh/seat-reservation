@@ -1,5 +1,6 @@
 package com.seatbooking.repository;
 
+import com.seatbooking.model.RequestedSeat;
 import com.seatbooking.model.Seat;
 import com.seatbooking.model.SeatStatus;
 import java.util.List;
@@ -28,9 +29,10 @@ public class SeatRepository {
             """;
 
     private static final String SELECT_REQUESTED_SEATS = """
-            SELECT seat_label, status
-            FROM seats
-            WHERE show_id = ? AND seat_label = ANY (?::text[])
+            SELECT s.seat_label, s.status, r.user_id AS owner_id
+            FROM seats s
+            LEFT JOIN reservations r ON r.id = s.reservation_id
+            WHERE s.show_id = ? AND s.seat_label = ANY (?::text[])
             """;
 
     /**
@@ -79,10 +81,13 @@ public class SeatRepository {
     }
 
     /** Lock-free pre-check: lets an already-taken seat decline without queueing for row locks. */
-    public List<Seat> findRequestedSeats(UUID showId, List<String> labels) {
+    public List<RequestedSeat> findRequestedSeats(UUID showId, List<String> labels) {
         return jdbc.sql(SELECT_REQUESTED_SEATS)
                 .params(showId, toArray(labels))
-                .query(SeatRepository::mapSeat)
+                .query((rs, rowNum) -> new RequestedSeat(
+                        rs.getString("seat_label"),
+                        SeatStatus.valueOf(rs.getString("status")),
+                        rs.getString("owner_id")))
                 .list();
     }
 

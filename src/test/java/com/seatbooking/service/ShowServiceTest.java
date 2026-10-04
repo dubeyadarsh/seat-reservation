@@ -7,9 +7,12 @@ import static org.mockito.ArgumentMatchers.anyLong;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.never;
+import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.when;
 
+import com.seatbooking.cache.ShowCache;
+import com.seatbooking.config.CacheProperties;
 import com.seatbooking.dto.show.CreateShowRequest;
 import com.seatbooking.dto.show.SeatCounts;
 import com.seatbooking.dto.show.ShowResponse;
@@ -19,7 +22,9 @@ import com.seatbooking.model.SeatStatus;
 import com.seatbooking.model.Show;
 import com.seatbooking.repository.SeatRepository;
 import com.seatbooking.repository.ShowRepository;
+import java.time.Duration;
 import java.util.List;
+import java.util.Optional;
 import java.util.UUID;
 import org.junit.jupiter.api.Test;
 import org.springframework.http.HttpStatus;
@@ -31,7 +36,8 @@ class ShowServiceTest {
 
     private final ShowRepository repository = mock(ShowRepository.class);
     private final SeatRepository seatRepository = mock(SeatRepository.class);
-    private final ShowService service = new ShowService(repository, seatRepository);
+    private final ShowService service = new ShowService(repository, seatRepository,
+            new ShowCache(repository, new CacheProperties(Duration.ofSeconds(10), 100, 100)));
 
     @Test
     void createsShowWithEverySeatAvailableInRequestOrder() {
@@ -58,6 +64,31 @@ class ShowServiceTest {
         ShowResponse response = service.createShow(new CreateShowRequest("matinee", List.of("A1"), PRICE_PAISE, 2));
 
         assertThat(response.perUserLimit()).isEqualTo(2);
+    }
+
+    @Test
+    void showIsReadFromTheDatabaseOnceThenServedFromMemory() {
+        when(repository.findShow(SHOW_ID)).thenReturn(Optional.of(new Show(SHOW_ID, "cached", PRICE_PAISE, 4, 1)));
+        when(seatRepository.findSeatsByShow(SHOW_ID)).thenReturn(List.of(Seat.available("A1")));
+
+        service.getShow(SHOW_ID);
+        ShowResponse second = service.getShow(SHOW_ID);
+
+        assertThat(second.name()).isEqualTo("cached");
+        verify(repository, times(1)).findShow(SHOW_ID);
+    }
+
+    @Test
+    void unknownShowIsNotCachedSoItIsFoundOnceItExists() {
+        when(repository.findShow(SHOW_ID))
+                .thenReturn(Optional.empty())
+                .thenReturn(Optional.of(new Show(SHOW_ID, "late", PRICE_PAISE, 4, 1)));
+        when(seatRepository.findSeatsByShow(SHOW_ID)).thenReturn(List.of(Seat.available("A1")));
+
+        assertThatThrownBy(() -> service.getShow(SHOW_ID))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
+        assertThat(service.getShow(SHOW_ID).name()).isEqualTo("late");
     }
 
     @Test

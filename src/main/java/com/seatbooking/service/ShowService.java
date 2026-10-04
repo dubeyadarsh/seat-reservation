@@ -2,6 +2,7 @@ package com.seatbooking.service;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
+import com.seatbooking.cache.ShowCache;
 import com.seatbooking.dto.show.CreateShowRequest;
 import com.seatbooking.dto.show.ShowResponse;
 import com.seatbooking.exception.ApiException;
@@ -25,6 +26,7 @@ public class ShowService {
 
     private final ShowRepository showRepository;
     private final SeatRepository seatRepository;
+    private final ShowCache showCache;
 
     /** Show and seats are written in one transaction, so a show never exists with only some of its seats. */
     @Transactional
@@ -43,7 +45,7 @@ public class ShowService {
     /** Seat statuses and counts always come from one read, so the response reconciles with itself. */
     @Transactional(readOnly = true)
     public ShowResponse getShow(UUID showId) {
-        Show show = showRepository.findShow(showId)
+        Show show = showCache.find(showId)
                 .orElseThrow(() -> ApiException.notFound("No show with id " + showId));
         return ShowResponse.from(show, seatRepository.findSeatsByShow(showId));
     }

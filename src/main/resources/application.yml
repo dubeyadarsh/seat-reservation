@@ -1,6 +1,10 @@
 server:
   port: ${PORT:8080}
   shutdown: graceful
+  tomcat:
+    # Connections beyond max-connections wait in the OS backlog instead of being refused by the kernel.
+    accept-count: ${TOMCAT_ACCEPT_COUNT:1000}
+    max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
 
 spring:
   application:
@@ -22,9 +26,14 @@ spring:
     hikari:
       pool-name: seatbooking-pool
       maximum-pool-size: ${DB_POOL_SIZE:20}
-      minimum-idle: ${DB_POOL_MIN_IDLE:5}
-      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:30000}
+      # Fixed-size pool: no connection setup in the middle of a burst.
+      minimum-idle: ${DB_POOL_MIN_IDLE:${DB_POOL_SIZE:20}}
+      # Admission control keeps waits short; a request that still waits this long is answered 429.
+      connection-timeout: ${DB_CONNECTION_TIMEOUT_MS:5000}
       max-lifetime: ${DB_MAX_LIFETIME_MS:1800000}
+      data-source-properties:
+        # Enforced by PostgreSQL itself, so a stuck query or lock wait can never pin a connection.
+        options: "-c statement_timeout=${DB_STATEMENT_TIMEOUT_MS:5000} -c lock_timeout=${DB_LOCK_TIMEOUT_MS:3000}"
 
   flyway:
     enabled: true
@@ -82,3 +91,11 @@ app:
     admin-secret: ${ADMIN_SECRET:}
   cors:
     allowed-origins: ${CORS_ALLOWED_ORIGINS:*}
+  load-shedding:
+    max-concurrent-requests: ${MAX_CONCURRENT_REQUESTS:32}
+    queue-timeout: ${REQUEST_QUEUE_TIMEOUT:30s}
+    retry-after: ${RETRY_AFTER:2s}
+  cache:
+    sold-seat-ttl: ${SOLD_SEAT_CACHE_TTL:10s}
+    sold-seat-max-entries: ${SOLD_SEAT_CACHE_MAX_ENTRIES:100000}
+    show-max-entries: ${SHOW_CACHE_MAX_ENTRIES:10000}

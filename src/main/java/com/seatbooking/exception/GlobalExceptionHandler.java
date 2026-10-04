@@ -1,14 +1,22 @@
 package com.seatbooking.exception;
 
+import static net.logstash.logback.argument.StructuredArguments.kv;
+
 import com.fasterxml.jackson.databind.PropertyNamingStrategies;
+import com.seatbooking.config.LoadSheddingProperties;
 import com.seatbooking.security.InvalidTokenException;
+import java.sql.SQLTransientConnectionException;
 import java.util.LinkedHashMap;
 import java.util.Map;
+import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.HttpStatusCode;
 import org.springframework.http.ResponseEntity;
 import org.springframework.dao.ConcurrencyFailureException;
+import org.springframework.dao.TransientDataAccessException;
+import org.springframework.jdbc.CannotGetJdbcConnectionException;
 import org.springframework.http.converter.HttpMessageNotReadableException;
 import org.springframework.security.access.AccessDeniedException;
 import org.springframework.security.core.AuthenticationException;
@@ -21,10 +29,13 @@ import org.springframework.web.method.annotation.MethodArgumentTypeMismatchExcep
 /** Turns every exception into an {@link ErrorResponse}. */
 @Slf4j
 @RestControllerAdvice
+@RequiredArgsConstructor
 public class GlobalExceptionHandler {
 
     private static final PropertyNamingStrategies.NamingBase SNAKE_CASE =
             (PropertyNamingStrategies.NamingBase) PropertyNamingStrategies.SNAKE_CASE;
+
+    private final LoadSheddingProperties loadShedding;
 
     /** Our own errors: status and code come from the exception. */
     @ExceptionHandler(ApiException.class)
@@ -69,6 +80,31 @@ public class GlobalExceptionHandler {
                 .body(ErrorResponse.of("seat_taken", "Seat selection conflicted; please retry"));
     }
 
+    /**
+     * Statement or lock timeout, or similar transient database trouble: the request was too slow under
+     * load, not wrong. 429 with Retry-After tells the client to come back; nothing was committed.
+     */
+    @ExceptionHandler(TransientDataAccessException.class)
+    public ResponseEntity<ErrorResponse> handleTransientDataAccess(TransientDataAccessException ex) {
+        log.warn("Transient database failure, answering busy", kv("cause", ex.getMostSpecificCause().toString()));
+        return busy();
+    }
+
+    /**
+     * No pooled connection within the timeout means the instance is saturated: back-pressure (429).
+     * Failing to open a connection at all means the database is down: 503, and readiness fails too.
+     */
+    @ExceptionHandler(CannotGetJdbcConnectionException.class)
+    public ResponseEntity<ErrorResponse> handleNoConnection(CannotGetJdbcConnectionException ex) {
+        if (ex.getMostSpecificCause() instanceof SQLTransientConnectionException) {
+            log.warn("Connection pool exhausted, answering busy");
+            return busy();
+        }
+        log.error("Database unavailable", ex);
+        return ResponseEntity.status(HttpStatus.SERVICE_UNAVAILABLE)
+                .body(ErrorResponse.of("database_unavailable", "The database is unavailable; retry shortly"));
+    }
+
     /** A path or query value that cannot be converted, such as a show id that is not a UUID. */
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ErrorResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
@@ -94,6 +130,12 @@ public class GlobalExceptionHandler {
         }
         log.error("Unhandled exception", ex);
         return ResponseEntity.internalServerError().body(ErrorResponse.of("internal_error", "An unexpected error occurred"));
+    }
+
+    private ResponseEntity<ErrorResponse> busy() {
+        return ResponseEntity.status(HttpStatus.TOO_MANY_REQUESTS)
+                .header(HttpHeaders.RETRY_AFTER, loadShedding.retryAfterSeconds())
+                .body(ErrorResponse.serverBusy());
     }
 
     /** 404 becomes "not_found", 405 becomes "method_not_allowed", etc. */

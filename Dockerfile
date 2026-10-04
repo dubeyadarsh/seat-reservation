@@ -20,8 +20,12 @@ USER app
 # Render injects PORT; 8080 is the local default.
 EXPOSE 8080
 
-# Heap is sized from the container limit (Render free tier is 512 MB), leaving room for
-# metaspace, thread stacks and the JDBC driver.
-ENV JAVA_OPTS="-XX:MaxRAMPercentage=70 -XX:+ExitOnOutOfMemoryError"
+# Every JVM memory region is capped so heap + metaspace + code cache + direct buffers + stacks stay
+# inside a 512 MB container under load; otherwise the kernel kills the process mid-burst.
+# Serial GC has the smallest footprint and is the right collector for a single small CPU.
+# MALLOC_ARENA_MAX stops glibc from reserving a native arena per thread.
+ENV MALLOC_ARENA_MAX=2
+ENV JAVA_OPTS="-XX:MaxRAMPercentage=50 -XX:MaxMetaspaceSize=160m -XX:ReservedCodeCacheSize=64m \
+-XX:MaxDirectMemorySize=64m -Xss512k -XX:+UseSerialGC -XX:+ExitOnOutOfMemoryError"
 
 ENTRYPOINT ["sh", "-c", "exec java $JAVA_OPTS -jar /app/app.jar"]

@@ -2,19 +2,20 @@ package com.seatbooking.service;
 
 import static net.logstash.logback.argument.StructuredArguments.kv;
 
+import com.seatbooking.cache.ShowCache;
+import com.seatbooking.cache.SoldSeatCache;
 import com.seatbooking.dto.reservation.ReservationResponse;
 import com.seatbooking.dto.reservation.ReserveOutcome;
 import com.seatbooking.exception.ApiException;
+import com.seatbooking.model.RequestedSeat;
 import com.seatbooking.model.Reservation;
 import com.seatbooking.model.ReservationStatus;
-import com.seatbooking.model.Seat;
 import com.seatbooking.model.SeatStatus;
 import com.seatbooking.model.Show;
 import com.seatbooking.observability.ReservationMetrics;
 import com.seatbooking.observability.ReservationMetrics.DeclineReason;
 import com.seatbooking.repository.ReservationRepository;
 import com.seatbooking.repository.SeatRepository;
-import com.seatbooking.repository.ShowRepository;
 import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
@@ -28,11 +29,16 @@ import java.util.stream.Collectors;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
+import org.springframework.transaction.support.TransactionOperations;
 
 /**
  * Booking is all-or-nothing (see DESIGN_DECISIONS.md): every requested seat is claimed, or none is
  * and the transaction rolls back. Declines are 409 domain outcomes, never server errors.
+ *
+ * <p>Work is ordered cheapest first, because in a burst almost every request loses: a seat already
+ * sold to someone else is declined from memory, retries and taken seats are answered by plain reads,
+ * and only a request that can still win opens a transaction. Caches and the confirmed counter are
+ * updated after commit, so they never reflect a booking that rolled back.
  */
 @Slf4j
 @Service
@@ -41,19 +47,22 @@ public class ReservationService {
 
     private static final String HASH_ALGORITHM = "SHA-256";
 
-    private final ShowRepository showRepository;
+    private final ShowCache showCache;
+    private final SoldSeatCache soldSeats;
     private final SeatRepository seatRepository;
     private final ReservationRepository reservationRepository;
+    private final TransactionOperations transaction;
     private final ReservationMetrics metrics;
 
-    @Transactional
     public ReserveOutcome reserve(UUID showId, String userId, List<String> requestedSeats, String idempotencyKey) {
-        Show show = showRepository.findShow(showId)
-                .orElseThrow(() -> ApiException.notFound("No show with id " + showId));
         List<String> seats = uniqueSeats(requestedSeats);
-        String requestHash = fingerprint(showId, seats);
+        List<String> soldToOthers = soldSeats.ownedByOthers(showId, userId, seats);
+        if (!soldToOthers.isEmpty()) {
+            throw seatTaken(soldToOthers);
+        }
 
-        // Retries and hot-seat losers are answered from reads alone: no lock, no insert, no rollback.
+        Show show = showCache.find(showId).orElseThrow(() -> ApiException.notFound("No show with id " + showId));
+        String requestHash = fingerprint(showId, seats);
         Optional<ReserveOutcome> replay = replayIfKeyUsed(userId, idempotencyKey, requestHash);
         if (replay.isPresent()) {
             return replay.get();
@@ -64,12 +73,35 @@ public class ReservationService {
             return replayIfKeyUsed(userId, idempotencyKey, requestHash).orElseThrow(() -> seatTaken(taken));
         }
 
+        ReserveOutcome outcome = transaction.execute(status -> claim(show, userId, seats, idempotencyKey, requestHash));
+        if (!outcome.replayed()) {
+            soldSeats.markSold(showId, userId, seats);
+            metrics.recordConfirmed();
+            log.info("reservation confirmed", kv("reservation_id", outcome.reservation().reservationId()),
+                    kv("show_id", showId), kv("seats", seats));
+        }
+        return outcome;
+    }
+
+    /** Only the owner may cancel; cancelling twice returns the same answer instead of failing. */
+    public ReservationResponse cancel(UUID reservationId, String userId) {
+        Cancellation cancellation = transaction.execute(status -> cancelInTransaction(reservationId, userId));
+        Reservation reservation = cancellation.reservation();
+        if (cancellation.released()) {
+            soldSeats.markReleased(reservation.showId(), reservation.seatLabels());
+        }
+        return ReservationResponse.from(reservation.cancelled());
+    }
+
+    /** The atomic part: per-user lock, exactly-once insert, limit check, then the conditional claim. */
+    private ReserveOutcome claim(Show show, String userId, List<String> seats, String idempotencyKey,
+                                 String requestHash) {
         // Taken before any row lock, so every transaction acquires locks in the same order.
-        reservationRepository.lockUserShow(showId, userId);
+        reservationRepository.lockUserShow(show.id(), userId);
 
         long amountPaise = show.pricePaise() * seats.size();
         Optional<UUID> reservationId = reservationRepository.insertIfAbsent(
-                showId, userId, idempotencyKey, requestHash, seats, amountPaise);
+                show.id(), userId, idempotencyKey, requestHash, seats, amountPaise);
         if (reservationId.isEmpty()) {
             return replayIfKeyUsed(userId, idempotencyKey, requestHash)
                     .orElseThrow(() -> ApiException.conflict("idempotency_conflict",
@@ -77,28 +109,24 @@ public class ReservationService {
         }
 
         enforcePerUserLimit(show, userId, reservationId.get(), seats.size());
-        claimOrRollBack(showId, seats, reservationId.get());
-
-        metrics.recordConfirmed();
-        log.info("reservation confirmed",
-                kv("reservation_id", reservationId.get()), kv("show_id", showId), kv("seats", seats));
+        claimOrRollBack(show.id(), seats, reservationId.get());
         return ReserveOutcome.created(new ReservationResponse(
-                reservationId.get(), showId, userId, seats, amountPaise, ReservationStatus.CONFIRMED));
+                reservationId.get(), show.id(), userId, seats, amountPaise, ReservationStatus.CONFIRMED));
     }
 
-    /** Only the owner may cancel; cancelling twice returns the same answer instead of failing. */
-    @Transactional
-    public ReservationResponse cancel(UUID reservationId, String userId) {
+    private Cancellation cancelInTransaction(UUID reservationId, String userId) {
         Reservation reservation = reservationRepository.findById(reservationId)
                 .filter(found -> found.userId().equals(userId))
                 .orElseThrow(() -> ApiException.notFound("No reservation with id " + reservationId));
 
         // Guarded on CONFIRMED, so concurrent cancels release the seats exactly once.
-        if (reservation.status() == ReservationStatus.CONFIRMED && reservationRepository.cancel(reservationId) == 1) {
-            int released = seatRepository.releaseSeats(reservationId);
-            log.info("reservation cancelled", kv("reservation_id", reservationId), kv("seats_released", released));
+        boolean released = reservation.status() == ReservationStatus.CONFIRMED
+                && reservationRepository.cancel(reservationId) == 1;
+        if (released) {
+            int seatsReleased = seatRepository.releaseSeats(reservationId);
+            log.info("reservation cancelled", kv("reservation_id", reservationId), kv("seats_released", seatsReleased));
         }
-        return ReservationResponse.from(reservation.cancelled());
+        return new Cancellation(reservation, released);
     }
 
     private Optional<ReserveOutcome> replayIfKeyUsed(String userId, String idempotencyKey, String requestHash) {
@@ -116,18 +144,24 @@ public class ReservationService {
         return ReserveOutcome.replayed(ReservationResponse.from(existing));
     }
 
-    /** Lock-free pre-check: finds seats that are already gone without queueing for their row locks. */
+    /**
+     * Lock-free pre-check: finds seats that are already gone without queueing for their row locks,
+     * and teaches the sold-seat cache their committed owners so the next loser never gets this far.
+     */
     private List<String> takenSeats(UUID showId, List<String> seats) {
-        List<Seat> found = seatRepository.findRequestedSeats(showId, seats);
+        List<RequestedSeat> found = seatRepository.findRequestedSeats(showId, seats);
         if (found.size() != seats.size()) {
-            Set<String> known = found.stream().map(Seat::label).collect(Collectors.toSet());
+            Set<String> known = found.stream().map(RequestedSeat::label).collect(Collectors.toSet());
             throw ApiException.notFound("Unknown seats for this show: "
                     + join(seats.stream().filter(seat -> !known.contains(seat)).toList()));
         }
-        return found.stream()
-                .filter(seat -> seat.status() != SeatStatus.AVAILABLE)
-                .map(Seat::label)
-                .toList();
+        List<RequestedSeat> taken = found.stream().filter(seat -> seat.status() != SeatStatus.AVAILABLE).toList();
+        taken.stream()
+                .filter(seat -> seat.ownerId() != null)
+                .collect(Collectors.groupingBy(RequestedSeat::ownerId,
+                        Collectors.mapping(RequestedSeat::label, Collectors.toList())))
+                .forEach((owner, labels) -> soldSeats.markSold(showId, owner, labels));
+        return taken.stream().map(RequestedSeat::label).toList();
     }
 
     private void enforcePerUserLimit(Show show, String userId, UUID reservationId, int requested) {
@@ -173,5 +207,8 @@ public class ReservationService {
 
     private static String join(List<String> seats) {
         return String.join(", ", seats);
+    }
+
+    private record Cancellation(Reservation reservation, boolean released) {
     }
 }

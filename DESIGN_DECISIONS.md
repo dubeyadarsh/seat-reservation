@@ -45,3 +45,36 @@ Keys are scoped per user, so two users may independently use the same key.
 
 A declined request rolls back, which also removes its reservation row. That is intentional: nothing
 was reserved, so retrying the same key should be allowed to try again.
+
+## Behaviour Under Overload
+
+A 20k burst on one small instance is far more traffic than it can serve at once. The goal is that
+every request still gets a correct, fast-failing answer (`201`, `200` replay, `409`, or `429` with
+`Retry-After`) and never a `5xx`, a dropped connection or a restart.
+
+**Cheapest answer first.** In a hot-seat storm almost every request loses, so the reserve path is
+ordered by cost:
+1. **Sold-seat cache:** a seat already confirmed to someone else is declined from memory, with no
+   database connection at all.
+2. **Plain reads:** an idempotent retry is answered from the reservation row; a seat the database
+   reports as taken is declined, and its owner is written to the cache for the next loser.
+3. **Transaction:** only a request that can still win takes the per-user lock, inserts and claims.
+
+**Admission control.** At most `MAX_CONCURRENT_REQUESTS` requests do work at once; the rest wait in
+a fair queue as parked virtual threads, before authentication or body parsing. Health probes and
+`/metrics` bypass the queue, so the platform never restarts a healthy instance because its health
+check was stuck behind the burst. A request still waiting after `REQUEST_QUEUE_TIMEOUT` gets `429`.
+
+**Bounded everything.** Fixed-size connection pool with a 5 s acquisition timeout; PostgreSQL
+`statement_timeout` and `lock_timeout` on every connection; size-bounded caches; JVM memory regions
+capped to fit a 512 MB container. Pool exhaustion and statement timeouts answer `429`, lock timeouts
+`409`; only a database that is actually unreachable answers `503`.
+
+**Why the cache cannot break correctness:** the database's conditional update still decides every
+win. The cache only holds seats whose confirmation is already committed, so it can wrongly decline a
+seat only within `SOLD_SEAT_CACHE_TTL` (default 10 s) after a cancel on a *different* instance;
+cancels on the same instance evict immediately.
+
+**Trade-off:** a user retrying an old idempotency key for a seat that was cancelled and then booked by
+someone else gets `409 seat_taken` instead of a `200` replay of the cancelled reservation. Both are
+correct statements about the seat; the fast path is worth this one edge case.
