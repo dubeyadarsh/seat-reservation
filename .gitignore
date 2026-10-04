@@ -8,3 +8,5 @@ target/
 burst/*.class
 step*.md
 .cursor/
+# Burst test output
+burst/last-run.json

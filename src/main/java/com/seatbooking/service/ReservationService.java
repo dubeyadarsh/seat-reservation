@@ -4,6 +4,7 @@ import static net.logstash.logback.argument.StructuredArguments.kv;
 
 import com.seatbooking.cache.ShowCache;
 import com.seatbooking.cache.SoldSeatCache;
+import com.seatbooking.cache.UsedKeyCache;
 import com.seatbooking.dto.reservation.ReservationResponse;
 import com.seatbooking.dto.reservation.ReserveOutcome;
 import com.seatbooking.exception.ApiException;
@@ -49,6 +50,7 @@ public class ReservationService {
 
     private final ShowCache showCache;
     private final SoldSeatCache soldSeats;
+    private final UsedKeyCache usedKeys;
     private final SeatRepository seatRepository;
     private final ReservationRepository reservationRepository;
     private final TransactionOperations transaction;
@@ -57,7 +59,7 @@ public class ReservationService {
     public ReserveOutcome reserve(UUID showId, String userId, List<String> requestedSeats, String idempotencyKey) {
         List<String> seats = uniqueSeats(requestedSeats);
         List<String> soldToOthers = soldSeats.ownedByOthers(showId, userId, seats);
-        if (!soldToOthers.isEmpty()) {
+        if (!soldToOthers.isEmpty() && !usedKeys.contains(userId, idempotencyKey)) {
             throw seatTaken(soldToOthers);
         }
 
@@ -75,6 +77,7 @@ public class ReservationService {
 
         ReserveOutcome outcome = transaction.execute(status -> claim(show, userId, seats, idempotencyKey, requestHash));
         if (!outcome.replayed()) {
+            usedKeys.add(userId, idempotencyKey);
             soldSeats.markSold(showId, userId, seats);
             metrics.recordConfirmed();
             log.info("reservation confirmed", kv("reservation_id", outcome.reservation().reservationId()),
@@ -130,8 +133,9 @@ public class ReservationService {
     }
 
     private Optional<ReserveOutcome> replayIfKeyUsed(String userId, String idempotencyKey, String requestHash) {
-        return reservationRepository.findByIdempotencyKey(userId, idempotencyKey)
-                .map(existing -> replayOf(existing, requestHash));
+        Optional<Reservation> existing = reservationRepository.findByIdempotencyKey(userId, idempotencyKey);
+        existing.ifPresent(found -> usedKeys.add(userId, idempotencyKey));
+        return existing.map(found -> replayOf(found, requestHash));
     }
 
     private ReserveOutcome replayOf(Reservation existing, String requestHash) {

@@ -75,6 +75,11 @@ win. The cache only holds seats whose confirmation is already committed, so it c
 seat only within `SOLD_SEAT_CACHE_TTL` (default 10 s) after a cancel on a *different* instance;
 cancels on the same instance evict immediately.
 
-**Trade-off:** a user retrying an old idempotency key for a seat that was cancelled and then booked by
-someone else gets `409 seat_taken` instead of a `200` replay of the cancelled reservation. Both are
-correct statements about the seat; the fast path is worth this one edge case.
+**Exact idempotency answers are kept:** the fast path is skipped for any idempotency key this instance
+knows is stored, so a reused key always reaches the replay check and gets `200` or
+`409 idempotency_key_reused`, never a generic `seat_taken`. Keys of declined requests are never stored,
+so the storm itself is still answered from memory.
+
+**Trade-off:** only for a key stored before this instance started (or by another instance) and aimed
+at a seat now sold to someone else, the answer is `409 seat_taken` instead of the replay. Still a `409`
+and still a true statement about the seat.

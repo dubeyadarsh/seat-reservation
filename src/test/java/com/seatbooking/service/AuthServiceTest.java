@@ -70,6 +70,6 @@ class AuthServiceTest {
         AuthProperties properties = new AuthProperties(
                 "unit-test-jwt-secret-of-at-least-32-bytes", TTL, "seat-booking", devTokenEnabled, adminSecret);
         return new AuthService(properties, new JwtService(properties, Clock.systemUTC(),
-                new CacheProperties(Duration.ofSeconds(10), 100, 100, 100)));
+                new CacheProperties(Duration.ofSeconds(10), 100, 100, 100, 100)));
     }
 }

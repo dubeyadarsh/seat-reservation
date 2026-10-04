@@ -5,6 +5,10 @@ server:
     # Connections beyond max-connections wait in the OS backlog instead of being refused by the kernel.
     accept-count: ${TOMCAT_ACCEPT_COUNT:1000}
     max-connections: ${TOMCAT_MAX_CONNECTIONS:8192}
+    # Outlive the platform proxy's idle timeout and never close after N requests, so the proxy never
+    # sends a request down a connection Tomcat is closing (the classic source of sporadic 502/520s).
+    keep-alive-timeout: ${TOMCAT_KEEP_ALIVE_TIMEOUT:120s}
+    max-keep-alive-requests: ${TOMCAT_MAX_KEEP_ALIVE_REQUESTS:-1}
 
 spring:
   application:
@@ -102,3 +106,4 @@ app:
     sold-seat-max-entries: ${SOLD_SEAT_CACHE_MAX_ENTRIES:100000}
     show-max-entries: ${SHOW_CACHE_MAX_ENTRIES:10000}
     verified-token-max-entries: ${TOKEN_CACHE_MAX_ENTRIES:10000}
+    used-key-max-entries: ${USED_KEY_CACHE_MAX_ENTRIES:100000}

@@ -16,6 +16,7 @@ import static org.mockito.Mockito.when;
 
 import com.seatbooking.cache.ShowCache;
 import com.seatbooking.cache.SoldSeatCache;
+import com.seatbooking.cache.UsedKeyCache;
 import com.seatbooking.config.CacheProperties;
 import com.seatbooking.dto.reservation.ReservationResponse;
 import com.seatbooking.dto.reservation.ReserveOutcome;
@@ -56,11 +57,12 @@ class ReservationServiceTest {
     private final SeatRepository seatRepository = mock(SeatRepository.class);
     private final ReservationRepository reservationRepository = mock(ReservationRepository.class);
     private final SimpleMeterRegistry registry = new SimpleMeterRegistry();
-    private final CacheProperties cacheProperties = new CacheProperties(Duration.ofMinutes(1), 1_000, 100, 100);
+    private final CacheProperties cacheProperties = new CacheProperties(Duration.ofMinutes(1), 1_000, 100, 100, 1_000);
     private final SoldSeatCache soldSeats = new SoldSeatCache(cacheProperties);
     private final ReservationService service = new ReservationService(
-            new ShowCache(showRepository, cacheProperties), soldSeats, seatRepository, reservationRepository,
-            TransactionOperations.withoutTransaction(), new ReservationMetrics(registry));
+            new ShowCache(showRepository, cacheProperties), soldSeats, new UsedKeyCache(cacheProperties),
+            seatRepository, reservationRepository, TransactionOperations.withoutTransaction(),
+            new ReservationMetrics(registry));
 
     @BeforeEach
     void showExists() {
@@ -117,6 +119,18 @@ class ReservationServiceTest {
 
         assertThat(outcome.replayed()).isTrue();
         assertThat(outcome.reservation().reservationId()).isEqualTo(RESERVATION_ID);
+    }
+
+    @Test
+    void reusedKeyAimedAtASeatSoldToSomeoneElseStillGetsTheExactKeyReusedAnswer() {
+        winningReservationFor(USER);
+        service.reserve(SHOW_ID, USER, SEATS, KEY);
+        soldSeats.markSold(SHOW_ID, OTHER_USER, List.of("A2"));
+        when(reservationRepository.findByIdempotencyKey(USER, KEY)).thenReturn(Optional.of(existing(SEATS)));
+
+        assertThatThrownBy(() -> service.reserve(SHOW_ID, USER, List.of("A2"), KEY))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("code", "idempotency_key_reused");
     }
 
     @Test

@@ -86,7 +86,7 @@ class JwtServiceTest {
 
     private static JwtService serviceAt(Clock clock, String secret, String issuer) {
         AuthProperties properties = new AuthProperties(secret, TTL, issuer, true, "admin-secret");
-        return new JwtService(properties, clock, new CacheProperties(Duration.ofSeconds(10), 100, 100, 100));
+        return new JwtService(properties, clock, new CacheProperties(Duration.ofSeconds(10), 100, 100, 100, 100));
     }
 
     private static final class MutableClock extends Clock {
