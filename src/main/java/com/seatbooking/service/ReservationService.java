@@ -51,19 +51,31 @@ public class ReservationService {
         Show show = showRepository.findShow(showId)
                 .orElseThrow(() -> ApiException.notFound("No show with id " + showId));
         List<String> seats = uniqueSeats(requestedSeats);
+        String requestHash = fingerprint(showId, seats);
+
+        // Retries and hot-seat losers are answered from reads alone: no lock, no insert, no rollback.
+        Optional<ReserveOutcome> replay = replayIfKeyUsed(userId, idempotencyKey, requestHash);
+        if (replay.isPresent()) {
+            return replay.get();
+        }
+        List<String> taken = takenSeats(showId, seats);
+        if (!taken.isEmpty()) {
+            // A parallel retry of this key may have just committed these seats; that is a replay, not a loss.
+            return replayIfKeyUsed(userId, idempotencyKey, requestHash).orElseThrow(() -> seatTaken(taken));
+        }
 
         // Taken before any row lock, so every transaction acquires locks in the same order.
         reservationRepository.lockUserShow(showId, userId);
 
-        String requestHash = fingerprint(showId, seats);
         long amountPaise = show.pricePaise() * seats.size();
         Optional<UUID> reservationId = reservationRepository.insertIfAbsent(
                 showId, userId, idempotencyKey, requestHash, seats, amountPaise);
         if (reservationId.isEmpty()) {
-            return replayOf(userId, idempotencyKey, requestHash);
+            return replayIfKeyUsed(userId, idempotencyKey, requestHash)
+                    .orElseThrow(() -> ApiException.conflict("idempotency_conflict",
+                            "This idempotency key is in use by another request"));
         }
 
-        rejectUnknownOrTakenSeats(showId, seats);
         enforcePerUserLimit(show, userId, reservationId.get(), seats.size());
         claimOrRollBack(showId, seats, reservationId.get());
 
@@ -89,10 +101,12 @@ public class ReservationService {
         return ReservationResponse.from(reservation.cancelled());
     }
 
-    private ReserveOutcome replayOf(String userId, String idempotencyKey, String requestHash) {
-        Reservation existing = reservationRepository.findByIdempotencyKey(userId, idempotencyKey)
-                .orElseThrow(() -> ApiException.conflict("idempotency_conflict",
-                        "This idempotency key is in use by another request"));
+    private Optional<ReserveOutcome> replayIfKeyUsed(String userId, String idempotencyKey, String requestHash) {
+        return reservationRepository.findByIdempotencyKey(userId, idempotencyKey)
+                .map(existing -> replayOf(existing, requestHash));
+    }
+
+    private ReserveOutcome replayOf(Reservation existing, String requestHash) {
         if (!existing.requestHash().equals(requestHash)) {
             metrics.recordDeclined(DeclineReason.KEY_REUSED);
             throw ApiException.conflict("idempotency_key_reused",
@@ -102,21 +116,18 @@ public class ReservationService {
         return ReserveOutcome.replayed(ReservationResponse.from(existing));
     }
 
-    /** Lock-free pre-check: declines a seat that is already gone without queueing for its row lock. */
-    private void rejectUnknownOrTakenSeats(UUID showId, List<String> seats) {
+    /** Lock-free pre-check: finds seats that are already gone without queueing for their row locks. */
+    private List<String> takenSeats(UUID showId, List<String> seats) {
         List<Seat> found = seatRepository.findRequestedSeats(showId, seats);
         if (found.size() != seats.size()) {
             Set<String> known = found.stream().map(Seat::label).collect(Collectors.toSet());
             throw ApiException.notFound("Unknown seats for this show: "
                     + join(seats.stream().filter(seat -> !known.contains(seat)).toList()));
         }
-        List<String> taken = found.stream()
+        return found.stream()
                 .filter(seat -> seat.status() != SeatStatus.AVAILABLE)
                 .map(Seat::label)
                 .toList();
-        if (!taken.isEmpty()) {
-            declineAsSeatTaken(taken);
-        }
     }
 
     private void enforcePerUserLimit(Show show, String userId, UUID reservationId, int requested) {
@@ -132,13 +143,13 @@ public class ReservationService {
         List<String> claimed = seatRepository.claimSeats(showId, seats, reservationId);
         if (claimed.size() != seats.size()) {
             // Someone won the race between the pre-check and the lock; roll the whole request back.
-            declineAsSeatTaken(seats.stream().filter(seat -> !claimed.contains(seat)).toList());
+            throw seatTaken(seats.stream().filter(seat -> !claimed.contains(seat)).toList());
         }
     }
 
-    private void declineAsSeatTaken(List<String> seats) {
+    private ApiException seatTaken(List<String> seats) {
         metrics.recordDeclined(DeclineReason.SEAT_TAKEN);
-        throw ApiException.conflict("seat_taken", "Seats already taken: " + join(seats));
+        return ApiException.conflict("seat_taken", "Seats already taken: " + join(seats));
     }
 
     private static List<String> uniqueSeats(List<String> requestedSeats) {
@@ -150,7 +161,7 @@ public class ReservationService {
     }
 
     /** Identifies the request body behind an idempotency key, so a reused key with different seats is caught. */
-    private static String fingerprint(UUID showId, List<String> seats) {
+    static String fingerprint(UUID showId, List<String> seats) {
         String canonical = showId + "|" + String.join(",", seats.stream().sorted().toList());
         try {
             byte[] hash = MessageDigest.getInstance(HASH_ALGORITHM).digest(canonical.getBytes(StandardCharsets.UTF_8));
